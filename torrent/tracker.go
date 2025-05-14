@@ -5,8 +5,12 @@ import (
 	"strconv"
 )
 
-func (t *TorrentFile) BuildTrackerURL() (string, error) {
-    base, err := url.Parse(t.Announce)
+func (t *TorrentFile) BuildTrackerURL(customURL ...string) (string, error) {
+    announceURL := t.Announce
+	if len(customURL) > 0 && customURL[0] != "" {
+		announceURL = customURL[0]
+	}
+    base, err := url.Parse(announceURL)
     if err != nil {
         return "", err
     }
@@ -18,6 +22,7 @@ func (t *TorrentFile) BuildTrackerURL() (string, error) {
         "downloaded": []string{"0"},
         "left":       []string{strconv.Itoa(t.Length)},
         "compact":    []string{"1"},
+        "numwant":    []string{"50"},
     }
     base.RawQuery = params.Encode()
     return base.String(), nil

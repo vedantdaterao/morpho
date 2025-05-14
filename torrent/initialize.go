@@ -16,10 +16,19 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 	if announce, ok := root["announce"].(string); ok {
 		Torrent.Announce = announce
 	}
-	if announceList, ok := root["announce-list"].([][]string); ok {
-		Torrent.AnnounceList = announceList
-	}
-	
+	// if announceList, ok := root["announce-list"].([]string); ok {
+	if rawAnnounceList, ok := root["announce-list"].([]any); ok {
+		for _, tier := range rawAnnounceList {
+			if tierSlice, ok := tier.([]any); ok {
+				for _, url := range tierSlice {
+					if urlStr, ok := url.(string); ok {
+						Torrent.AnnounceList = append(Torrent.AnnounceList, urlStr)
+					}
+				}
+			}
+		}
+	}		
+
 
 	// Extract info dictionary
 	infoMap, ok := root["info"].(map[string]interface{})
@@ -110,3 +119,6 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 	return t, nil
 }
 
+func GetAnnouceList() (TorrentMeta){
+	return Torrent
+}

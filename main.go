@@ -17,7 +17,7 @@ func main() {
     if err != nil {
 	    log.Fatal(err)
     }
-    
+
     TorrentFile, err := torrent.Initialize(result)
     if err != nil {
 	    log.Fatal(err)

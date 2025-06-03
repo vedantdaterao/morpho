@@ -2,7 +2,7 @@ package torrent
 
 import (
 	"encoding/binary"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -44,21 +44,21 @@ func (p *PeerList) GetNumberOfPeers() int {
     return len(p.Peers)
 }
 
-func Announce(tf *TorrentFile) {
+func Announce(tf *TorrentFile) error{
 	url, err := tf.BuildTrackerURL()
 	if err != nil{
-		panic("tracker url error")
+		return errors.New("tracker url error")
 	}
-	fmt.Println("URL - ", url)
-	trackerResp, _ := GetTrackerResponse(url)
+	// fmt.Println("URL - ", url)
+	GetTrackerResponse(url)
 	
 	if AllPeerList.GetNumberOfPeers() < 30 {
 		for _, x := range Torrent.AnnounceList {
 			url, err := tf.BuildTrackerURL(x)
 			if err != nil{
-				panic("tracker url error")
+				return errors.New("tracker url error")
 			}
-			fmt.Println("URL - ", url)
+			// fmt.Println("URL - ", url)
 			GetTrackerResponse(url)
 			// trackerResp, _ := GetTrackerResponse(url)
 			// jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
@@ -69,11 +69,15 @@ func Announce(tf *TorrentFile) {
 		}
 	}
 	// JSON response
-	jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
-    if err != nil {
-	    fmt.Println("Error marshaling to JSON:", err)
-    }
-    fmt.Println(string(jsonData))
+	// jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
+    // if err != nil {
+	//     fmt.Println("Error marshaling to JSON:", err)
+    // }
+    // fmt.Println(string(jsonData))
+	if AllPeerList.GetNumberOfPeers() == 0 {
+		return errors.New("can't get peers from trackers")
+	}
+	return nil
 }
 
 func GetTrackerResponse(fullURL string) (TrackerResponse, error){
@@ -107,7 +111,7 @@ func GetTrackerResponse(fullURL string) (TrackerResponse, error){
 func ParseTrackerResponse(data any) (*TrackerResponse, error) {
 	dict, ok := data.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("not bencoded dict")
+		return nil, errors.New("not bencoded dict")
 	}
 
 	resp := &TrackerResponse{}

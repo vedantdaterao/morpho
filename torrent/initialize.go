@@ -2,14 +2,14 @@ package torrent
 
 import (
 	"crypto/sha1"
-	"fmt"
+	"errors"
 )
 
 func Initialize(parsed interface{}) (TorrentFile, error) {
 
 	root, ok := parsed.(map[string]interface{})
 	if !ok {
-		return TorrentFile{}, fmt.Errorf("top-level bencode is not a dictionary")
+		return TorrentFile{}, errors.New("top-level bencode is not a dictionary")
 	}
 
 	// Extract TorrentInfo
@@ -33,7 +33,7 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 	// Extract info dictionary
 	infoMap, ok := root["info"].(map[string]interface{})
 	if !ok {
-		return TorrentFile{}, fmt.Errorf("missing or invalid 'info' dictionary")
+		return TorrentFile{}, errors.New("missing or invalid 'info' dictionary")
 	}
 	if pieceLen, ok := infoMap["piece length"].(uint); ok {
 		Info.PieceLength = pieceLen
@@ -51,7 +51,7 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 		for _, f := range files{
 			fileDict, ok := f.(map[string]interface{})
 			if !ok {
-				return TorrentFile{}, fmt.Errorf("invalid file entry in 'files'")
+				return TorrentFile{}, errors.New("invalid file entry in 'files'")
 			}
 			if length, ok := fileDict["length"].(int); ok {
 				file.Length = length
@@ -69,7 +69,6 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 		// Single-file mode
 		if length, ok := infoMap["length"].(int); ok {
 			Info.Length = length
-			fmt.Println(Info.Length)
 		}
 	}
 	

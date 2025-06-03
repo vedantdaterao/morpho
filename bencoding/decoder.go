@@ -73,25 +73,35 @@ func (d *Parser) decodeList() ([]interface{}, error) {
 }
 
 func (d *Parser) decodeDict() (map[string]interface{}, error) {
+	start := d.pos
 	d.pos++
 	dict := make(map[string]interface{})
+	var afterPieces int
 	for d.pos < len(d.data) && d.data[d.pos] != 'e' {
 		key, err := d.decodeString()
-		if err != nil{
+		if err != nil {
 			return nil, err
 		}
-
 		val, err := d.decode()
-		if err != nil{
+		if err != nil {
 			return nil, err
 		}
 		dict[key] = val
+
+		// Record position immediately after 'pieces' value
+		if key == "pieces" {
+			afterPieces = d.pos
+			dict["after_pieces"] = d.data[afterPieces:]
+		}
 	}
+
 	if d.pos >= len(d.data) {
 		return nil, errors.New("unterminated dictionary")
 	}
 
-	d.pos++ //skip 'e'
+	d.pos++ // skip 'e'
+	dict["raw"] = d.data[start:d.pos]
+
 	return dict, nil
 }
 

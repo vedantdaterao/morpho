@@ -5,6 +5,9 @@ import (
 	"errors"
 )
 
+var Info InfoDict
+var Torrent TorrentMeta
+
 func Initialize(parsed interface{}) (TorrentFile, error) {
 
 	root, ok := parsed.(map[string]interface{})
@@ -27,8 +30,7 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 				}
 			}
 		}
-	}		
-
+	}
 
 	// Extract info dictionary
 	infoMap, ok := root["info"].(map[string]interface{})
@@ -45,10 +47,10 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 		Info.Name = name
 	}
 
-	// single file or multi-file 
+	// single file or multi-file
 	if files, ok := infoMap["files"].([]interface{}); ok {
 		var file FileEntry
-		for _, f := range files{
+		for _, f := range files {
 			fileDict, ok := f.(map[string]interface{})
 			if !ok {
 				return TorrentFile{}, errors.New("invalid file entry in 'files'")
@@ -63,42 +65,42 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 					}
 				}
 			}
-			}
-			Info.Files = append(Info.Files, file)
+		}
+		Info.Files = append(Info.Files, file)
 	} else {
 		// Single-file mode
 		if length, ok := infoMap["length"].(int); ok {
 			Info.Length = length
 		}
 	}
-	
-	if piecesRaw, ok := infoMap["after_pieces"].([]byte); ok{
+
+	if piecesRaw, ok := infoMap["after_pieces"].([]byte); ok {
 		for i := 0; i+20 <= len(piecesRaw); i += 20 {
-    		var hash [20]byte
-    		copy(hash[:], piecesRaw[i:i+20])
-    		Info.Pieces = append(Info.Pieces, hash)
+			var hash [20]byte
+			copy(hash[:], piecesRaw[i:i+20])
+			Info.Pieces = append(Info.Pieces, hash)
 		}
 	}
-	
+
 	if pieceLen, ok := infoMap["piece length"].(uint); ok {
 		Torrent.Info.PieceLength = pieceLen
 	}
 
 	Torrent.Info = &Info
-	
+
 	var hash [20]byte
-	if rawInfo, ok := infoMap["raw"].([]byte); ok{
+	if rawInfo, ok := infoMap["raw"].([]byte); ok {
 		hash = sha1.Sum(rawInfo)
 	}
 
 	t := TorrentFile{
-		Announce: Torrent.Announce,
-		InfoHash: hash,
+		Announce:    Torrent.Announce,
+		InfoHash:    hash,
 		PieceHashes: Torrent.Info.Pieces,
 		PieceLength: Torrent.Info.PieceLength,
-		Name: Torrent.Info.Name,
+		Name:        Torrent.Info.Name,
 	}
-	
+
 	if Torrent.Info.Length > int(0) {
 		// Single-file mode
 		t.Length = int(Torrent.Info.Length)
@@ -112,12 +114,9 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 		}
 		t.Length = total
 	} else {
-		panic("invalid torrent: no length or files")
+		return TorrentFile{}, errors.New("invalid torrent: length or files not provided")
+		// panic("invalid torrent: no length or files")
 	}
 
 	return t, nil
-}
-
-func GetAnnouceList() (TorrentMeta){
-	return Torrent
 }

@@ -25,10 +25,6 @@ type FileEntry struct {
 	Path   []string `torrent:"path"`
 }
 
-var Info InfoDict
-
-var Torrent TorrentMeta
-
 type TorrentFile struct {
 	Announce    string
 	InfoHash    [20]byte
@@ -51,7 +47,7 @@ type TrackerResponse struct {
 
 type PeerInfo struct {
 	PeerID string `torrent:"peer id"` // 20-byte peer ID
-	// TODO: implement net.Addr insted of ip & port
+	// TODO: maybe implement net.Addr insted of ip & port
 	IP   net.IP `torrent:"ip"`   // IPv4, IPv6 or DNS
 	Port uint16 `torrent:"port"` // TCP port number
 }

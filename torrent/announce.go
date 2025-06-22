@@ -31,62 +31,61 @@ func (a *PeerList) AddPeers(newPeers []PeerInfo) {
 	}
 }
 
-
 func (a *PeerList) GetPeers() []PeerInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]PeerInfo{}, a.Peers...) 
+	return append([]PeerInfo{}, a.Peers...)
 }
 
 func (p *PeerList) GetNumberOfPeers() int {
-    p.mu.Lock()        
-    defer p.mu.Unlock() 
-    return len(p.Peers)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.Peers)
 }
 
-func Announce(tf *TorrentFile) error{
+func Announce(tf *TorrentFile) error {
 	url, err := tf.BuildTrackerURL()
-	if err != nil{
+	if err != nil {
 		return errors.New("tracker url error")
 	}
 	// fmt.Println("URL - ", url)
 	GetTrackerResponse(url)
-	
+
 	if AllPeerList.GetNumberOfPeers() < 30 {
 		for _, x := range Torrent.AnnounceList {
 			url, err := tf.BuildTrackerURL(x)
-			if err != nil{
+			if err != nil {
 				return errors.New("tracker url error")
 			}
 			// fmt.Println("URL - ", url)
-			if _, err := GetTrackerResponse(url); err!= nil{
+			if _, err := GetTrackerResponse(url); err != nil {
 				continue
 			}
 			// trackerResp, _ := GetTrackerResponse(url)
 			// jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
-    		// if err != nil {
-	    	// 	fmt.Println("Error marshaling to JSON:", err)
-    		// }
-    		// fmt.Println(string(jsonData))
+			// if err != nil {
+			// 	fmt.Println("Error marshaling to JSON:", err)
+			// }
+			// fmt.Println(string(jsonData))
 		}
 	}
 	// JSON response
 	// jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
-    // if err != nil {
+	// if err != nil {
 	//     fmt.Println("Error marshaling to JSON:", err)
-    // }
-    // fmt.Println(string(jsonData))
+	// }
+	// fmt.Println(string(jsonData))
 	if AllPeerList.GetNumberOfPeers() == 0 {
 		return errors.New("can't get peers from trackers")
 	}
 	return nil
 }
 
-func GetTrackerResponse(fullURL string) (TrackerResponse, error){
+func GetTrackerResponse(fullURL string) (TrackerResponse, error) {
 	if strings.HasPrefix(fullURL, "udp://") {
-	    log.Printf("Skipping unsupported UDP tracker")
+		log.Printf("Skipping unsupported UDP tracker")
 		return TrackerResponse{}, nil
-    }
+	}
 	resp, err := http.Get(fullURL)
 	if err != nil {
 		return TrackerResponse{}, err
@@ -103,15 +102,15 @@ func GetTrackerResponse(fullURL string) (TrackerResponse, error){
 	if err != nil {
 		log.Fatalf("Bencode decode failed: %v", err)
 	}
-	
-	trackerResp, err := ParseTrackerResponse(decoded)
+
+	trackerResp, err := parseTrackerResponse(decoded)
 	if err != nil {
 		log.Fatalf("Response Parser failed: %v", err)
 	}
 	return *trackerResp, nil
 }
 
-func ParseTrackerResponse(data any) (*TrackerResponse, error) {
+func parseTrackerResponse(data any) (*TrackerResponse, error) {
 	dict, ok := data.(map[string]any)
 	if !ok {
 		return nil, errors.New("not bencoded dict")
@@ -119,7 +118,7 @@ func ParseTrackerResponse(data any) (*TrackerResponse, error) {
 
 	resp := &TrackerResponse{}
 
-	for key, val := range dict{
+	for key, val := range dict {
 		switch key {
 		case "falure reason":
 			resp.FailureReason = val.(string)
@@ -140,11 +139,11 @@ func ParseTrackerResponse(data any) (*TrackerResponse, error) {
 			switch v := val.(type) {
 			case string:
 				bin := []byte(v)
-				chunks, err := ChunkPeers(bin)
+				chunks, err := chunkPeers(bin)
 				if err != nil {
 					return nil, err
 				}
-				AllPeerList.AddPeers(ParseCompactChunks(chunks))
+				AllPeerList.AddPeers(parseCompactChunks(chunks))
 			case []any:
 				peersList := make([]PeerInfo, 0, len(v))
 				for _, p := range v {
@@ -162,7 +161,7 @@ func ParseTrackerResponse(data any) (*TrackerResponse, error) {
 	return resp, nil
 }
 
-func ChunkPeers(data []byte) ([][6]byte, error) {
+func chunkPeers(data []byte) ([][6]byte, error) {
 	if len(data)%6 != 0 {
 		return nil, fmt.Errorf("invalid compact peer length: %d", len(data))
 	}
@@ -175,8 +174,7 @@ func ChunkPeers(data []byte) ([][6]byte, error) {
 	return chunks, nil
 }
 
-
-func ParseCompactChunks(chunks [][6]byte) []PeerInfo {
+func parseCompactChunks(chunks [][6]byte) []PeerInfo {
 	var peers []PeerInfo
 	for _, b := range chunks {
 		ip := net.IP(b[0:4])
@@ -185,4 +183,3 @@ func ParseCompactChunks(chunks [][6]byte) []PeerInfo {
 	}
 	return peers
 }
-

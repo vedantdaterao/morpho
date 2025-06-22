@@ -59,7 +59,9 @@ func Announce(tf *TorrentFile) error{
 				return errors.New("tracker url error")
 			}
 			// fmt.Println("URL - ", url)
-			GetTrackerResponse(url)
+			if _, err := GetTrackerResponse(url); err!= nil{
+				continue
+			}
 			// trackerResp, _ := GetTrackerResponse(url)
 			// jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
     		// if err != nil {
@@ -82,12 +84,13 @@ func Announce(tf *TorrentFile) error{
 
 func GetTrackerResponse(fullURL string) (TrackerResponse, error){
 	if strings.HasPrefix(fullURL, "udp://") {
-	    log.Printf("Skipping unsupported UDP tracker: %s", fullURL)
+	    log.Printf("Skipping unsupported UDP tracker")
 		return TrackerResponse{}, nil
     }
 	resp, err := http.Get(fullURL)
 	if err != nil {
-		log.Fatalf("HTTP request failed: %v", err)
+		return TrackerResponse{}, err
+		// log.Fatalf("HTTP request failed: %v", err)
 	}
 	defer resp.Body.Close()
 

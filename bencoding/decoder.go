@@ -6,19 +6,23 @@ import (
 	"strconv"
 )
 
-func (d *Parser) decode() (any, error) {
+func (d *Parser) decode(raw bool) (any, error) {
 	switch d.data[d.pos] {
-		case 'i':
-			return d.decodeInt()
-		case 'l':
-			return d.decodeList()
-		case 'd':
-			return d.decodeDict()
-		default:
-			if d.data[d.pos] >= '0' && d.data[d.pos] <= '9' {
-				return d.decodeString()
-			}
-			return nil, fmt.Errorf("unexpected character at pos %d: %c", d.pos, d.data[d.pos])
+	case 'i':
+		digits, err := d.decodeInt()
+		if err != nil {
+			return nil, err
+		}
+		return digits, nil
+	case 'l':
+		return d.decodeList(raw)
+	case 'd':
+		return d.decodeDict(raw)
+	default:
+		if d.data[d.pos] >= '0' && d.data[d.pos] <= '9' {
+			return d.decodeString()
+		}
+		return nil, fmt.Errorf("unexpected character at pos %d: %c", d.pos, d.data[d.pos])
 	}
 }
 
@@ -46,19 +50,30 @@ func (d *Parser) decodeInt() (int, error) {
 	d.pos++
 	start := d.pos
 	for d.pos < len(d.data) && d.data[d.pos] != 'e' {
+		if d.data[d.pos] == '-' && start == d.pos {
+			// Allow negative sign at the start
+			d.pos++
+		}
+		if d.data[d.pos] < '0' || d.data[d.pos] > '9' {
+			return 0, fmt.Errorf("invalid character in integer at pos %d: %c", d.pos, d.data[d.pos])
+		}
 		d.pos++
 	}
+
 	numStr := string(d.data[start:d.pos])
+	if d.pos >= len(d.data) || d.data[d.pos] != 'e' || len(numStr) == 0 {
+		return 0, errors.New("error parsing integer")
+	}
 	d.pos++ //skip 'e'
 	return strconv.Atoi(numStr)
 }
 
-func (d *Parser) decodeList() ([]interface{}, error) {
+func (d *Parser) decodeList(raw bool) ([]interface{}, error) {
 	d.pos++
 	var list []interface{}
 	for d.pos < len(d.data) && d.data[d.pos] != 'e' {
-		item, err := d.decode()
-		if err != nil{
+		item, err := d.decode(raw)
+		if err != nil {
 			return nil, err
 		}
 		list = append(list, item)
@@ -72,7 +87,7 @@ func (d *Parser) decodeList() ([]interface{}, error) {
 	return list, nil
 }
 
-func (d *Parser) decodeDict() (map[string]interface{}, error) {
+func (d *Parser) decodeDict(raw bool) (map[string]interface{}, error) {
 	start := d.pos
 	d.pos++
 	dict := make(map[string]interface{})
@@ -82,16 +97,18 @@ func (d *Parser) decodeDict() (map[string]interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
-		val, err := d.decode()
+		val, err := d.decode(raw)
 		if err != nil {
 			return nil, err
 		}
 		dict[key] = val
 
 		// Record position immediately after 'pieces' value
-		if key == "pieces" {
-			afterPieces = d.pos
-			dict["after_pieces"] = d.data[afterPieces:]
+		if raw {
+			if key == "pieces" {
+				afterPieces = d.pos
+				dict["after_pieces"] = d.data[afterPieces:]
+			}
 		}
 	}
 
@@ -100,12 +117,21 @@ func (d *Parser) decodeDict() (map[string]interface{}, error) {
 	}
 
 	d.pos++ // skip 'e'
-	dict["raw"] = d.data[start:d.pos]
+	if raw {
+		dict["raw"] = d.data[start:d.pos]
+	}
 
 	return dict, nil
 }
 
-func Decode(data []byte) (any, error){
+func Decode(data []byte, opts ...bool) (any, error) {
+	raw := false
+	if len(opts) > 0 {
+		raw = opts[0]
+	}
+	if len(data) == 0 {
+		return nil, errors.New("empty data")
+	}
 	d := Parser{data, 0}
-	return d.decode()
+	return d.decode(raw)
 }

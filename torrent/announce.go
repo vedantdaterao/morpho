@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/morpho/bencoding"
+	"github.com/torgo/bencoding"
 )
 
 func (a *PeerList) AddPeers(newPeers []PeerInfo) {
@@ -48,6 +48,7 @@ func Announce(tf *TorrentFile) error {
 	if err != nil {
 		return errors.New("tracker url error")
 	}
+	tries := 3
 	// fmt.Println("URL - ", url)
 	GetTrackerResponse(url)
 
@@ -76,37 +77,45 @@ func Announce(tf *TorrentFile) error {
 	// }
 	// fmt.Println(string(jsonData))
 	if AllPeerList.GetNumberOfPeers() == 0 {
-		return errors.New("can't get peers from trackers")
+		if tries == 0{
+			return errors.New("can't get peers from trackers")
+		}
+		GetTrackerResponse(url)
+		tries--
 	}
 	return nil
 }
 
 func GetTrackerResponse(fullURL string) (TrackerResponse, error) {
 	if strings.HasPrefix(fullURL, "udp://") {
-		log.Printf("Skipping unsupported UDP tracker")
 		return TrackerResponse{}, nil
 	}
-	resp, err := http.Get(fullURL)
+
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+
+	resp, err := client.Get(fullURL)
 	if err != nil {
-		return TrackerResponse{}, err
-		// log.Fatalf("HTTP request failed: %v", err)
+		return TrackerResponse{}, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Failed to read tracker response: %v", err)
+		return TrackerResponse{}, fmt.Errorf("failed to read tracker response: %w", err)
 	}
 
 	decoded, err := bencoding.Decode(bodyBytes)
 	if err != nil {
-		log.Fatalf("Bencode decode failed: %v", err)
+		return TrackerResponse{}, fmt.Errorf("bencode decode failed: %w", err)
 	}
 
 	trackerResp, err := parseTrackerResponse(decoded)
 	if err != nil {
-		log.Fatalf("Response Parser failed: %v", err)
+		return TrackerResponse{}, fmt.Errorf("response parser failed: %w", err)
 	}
+
 	return *trackerResp, nil
 }
 

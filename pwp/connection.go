@@ -1,97 +1,218 @@
 package pwp
 
 import (
-	"bufio"
-	"errors"
+	"crypto/sha1"
 	"fmt"
-	"io"
-	"net"
-	"strconv"
-	"time"
+	"log"
+	"os"
+	"sync/atomic"
+
+	"github.com/torgo/torrent"
 )
 
-func (p *PeerInfo) Listner(client ClientInfo) error {
-	for {
-		msg, err := read_message(p.reader) 
-		if err != nil {
-			if err == io.EOF {
-                fmt.Println("Peer disconnected:", p.addr)
-            } else {
-                fmt.Println("Error reading from peer:", err)
-            }
-            p.conn.Close()
-            p.connStatus = false
-            break
-		}
+func pieceLengthFor(tf torrent.TorrentFile, index int) int {
+	standard := int(tf.PieceLength)
+	totalPieces := len(tf.PieceHashes)
 
-		p.handleMsg(msg, client)
+	if index < totalPieces-1 {
+		return standard
 	}
-	return nil
+	remainder := tf.Length - (standard * (totalPieces - 1))
+	if remainder <= 0 {
+		return standard
+	}
+	return remainder
 }
 
+func downloadPiece(peer torrent.PeerInfo, tf torrent.TorrentFile, work pieceWork) ([]byte, error) {
+	addr := fmt.Sprintf("%s:%d", peer.IP, peer.Port)
 
-func SavePieces(pieceChan chan Block, client *ClientInfo) {
-	for b := range pieceChan {
-		data.mu.Lock()
-
-		piece, ok := data.pieces[b.index]
-		switch {
-		case !ok:
-			piece = newPiece(b.index, int(client.piecesLength))
-			data.pieces[b.index] = piece
-		case ok:
-			piece = piece.saveBlockData(b)
-			data.pieces[b.index] = piece
-		}
-
-		data.mu.Unlock()
-	}
-}
-
-
-func DialPeer(ip net.IP, port uint16, client ClientInfo, peerID []byte) (*PeerInfo, error){
-	peerI := PeerInfo{}
-	 
-	address := net.JoinHostPort(ip.String(), strconv.Itoa(int(port)))
-	
-	conn, err := net.DialTimeout("tcp", address, 5 * time.Second) 
+	peerID := []byte("-GO0001-123456789012")
+	conn, hs, err := Dial(addr, tf.InfoHash[:], peerID)
 	if err != nil {
-		return nil, errors.New("connection error: cant connect to the peer")
-	}
-	peerI.addr = conn.RemoteAddr()
-	reader := bufio.NewReader(conn)
-	
-	// Handshake Request
-	handshake := SerializeHandshake(client.infoHash, peerID)
-	if _, err := conn.Write(handshake); err != nil {
-		conn.Close()
 		return nil, err
 	}
 
-	// Handshake Response
-	// if err := read_handshake(reader, client.infoHash, &peerI); err != nil {
-	// 	conn.Close()
-	// 	return nil, err
-	// } 
-
-	peerI = PeerInfo{
-		connStatus: true,
-		conn: conn,
-		reader: reader,
-
-		amChoking: true, 		// true
-		amInterested: false, 	// true
+	if hs.Info_hash != tf.InfoHash {
+		conn.Close()
+		return nil, fmt.Errorf("info hash mismatch")
 	}
-	return &peerI, nil
+
+	p := NewPeer(hs.Peer_id, conn)
+	go p.Run()
+	defer p.Close()
+
+	p.Send(MsgInterested{})
+
+	for msg := range p.Incoming() {
+		p.UpdateState(msg)
+		if _, ok := msg.(MsgUnchoke); ok {
+			break
+		}
+	}
+
+	if p.PeerChoking {
+		return nil, fmt.Errorf("peer still choking")
+	}
+
+	if p.Bitfield == nil {
+		return nil, fmt.Errorf("peer bitfield nil")
+	}
+	if !p.Bitfield.HasPiece(work.index) {
+		return nil, fmt.Errorf("peer missing piece")
+	}
+
+	pieceLen := pieceLengthFor(tf, work.index)
+	buf := make([]byte, pieceLen)
+
+	blockSize := 16 * 1024
+	numBlocks := (pieceLen + blockSize - 1) / blockSize
+
+	type blockState struct {
+		received bool
+	}
+
+	blocks := make([]blockState, numBlocks)
+	receivedBlocks := 0
+	requested := 0
+	backlog := 0
+	maxBacklog := 5
+
+	for receivedBlocks < numBlocks {
+		for !p.PeerChoking &&
+			backlog < maxBacklog &&
+			requested < pieceLen {
+
+			blockLen := blockSize
+			if pieceLen-requested < blockLen {
+				blockLen = pieceLen - requested
+			}
+
+			p.Send(MsgRequest{
+				Index:  uint32(work.index),
+				Begin:  uint32(requested),
+				Length: uint32(blockLen),
+			})
+
+			requested += blockLen
+			backlog++
+		}
+
+		msg, ok := <-p.Incoming()
+		if !ok {
+			return nil, fmt.Errorf("peer disconnected")
+		}
+
+		p.UpdateState(msg)
+
+		switch m := msg.(type) {
+		case MsgPiece:
+			if int(m.Index) != work.index {
+				continue
+			}
+			blockIndex := int(m.Begin) / blockSize
+			if blockIndex < 0 || blockIndex >= numBlocks {
+				continue
+			}
+			if blocks[blockIndex].received {
+				continue
+			}
+			copy(buf[m.Begin:], m.Block)
+			blocks[blockIndex].received = true
+			receivedBlocks++
+			backlog--
+
+		case MsgChoke:
+			return nil, fmt.Errorf("peer re-choked")
+		}
+	}
+
+	// fmt.Println("piece data -")
+	// fmt.Println(hex.Dump(buf))
+
+	sum := sha1.Sum(buf)
+	if sum != work.hash {
+		return nil, fmt.Errorf("piece hash mismatch")
+	}
+
+	return buf, nil
 }
 
-func InitializeClient(infoHash []byte, pieceHashes [][20]byte, pieceLength uint) *ClientInfo{
-	return &ClientInfo{
-		expectedBitfieldLen: (len(pieceHashes) + 7 )/ 8,
-		infoHash: infoHash,
-		pieceHashes: pieceHashes,
-		piecesLength: pieceLength,
-		Bitfield: make([]byte, (len(pieceHashes) + 7) / 8),
-		pieceChan: make(chan Block),
+func worker(
+	peer torrent.PeerInfo, 
+	tf torrent.TorrentFile, 
+	queue chan pieceWork, 
+	results chan<- struct {
+		index int
+		data  []byte
+	},
+	) {
+	const maxConsecutiveFails = 3
+	consecutiveFails := 0
+
+	for work := range queue {
+		data, err := downloadPiece(peer, tf, work)
+		if err != nil {
+			log.Printf("peer %s failed piece %d: %v", peer.IP, work.index, err)
+			queue <- work
+			consecutiveFails++
+			if consecutiveFails >= maxConsecutiveFails {
+				log.Printf("peer %s dropped after %d consecutive failures", peer.IP, consecutiveFails)
+				return
+			}
+			continue
+		}
+		consecutiveFails = 0
+		results <- struct {
+			index int
+			data  []byte
+		}{work.index, data}
 	}
+}
+
+func Download(tf torrent.TorrentFile, peers []torrent.PeerInfo) error {
+	numPieces := len(tf.PieceHashes)
+
+	queue := make(chan pieceWork, numPieces)
+	results := make(chan struct {
+		index int
+		data  []byte
+	}, numPieces)
+
+	for i, hash := range tf.PieceHashes {
+		queue <- pieceWork{i, hash}
+	}
+
+	workerCount := 50
+	if len(peers) < workerCount {
+		workerCount = len(peers)
+	}
+	for i := 0; i < workerCount; i++ {
+		go worker(peers[i], tf, queue, results)
+	}
+
+	outFile, err := os.Create(tf.Name)
+	if err != nil {
+		return err
+	}
+	if err := outFile.Truncate(int64(tf.Length)); err != nil {
+		outFile.Close()
+		return err
+	}
+
+	var downloadedPieces int32
+	for int(downloadedPieces) < numPieces {
+		r := <-results
+		offset := int64(r.index) * int64(tf.PieceLength)
+		if _, err := outFile.WriteAt(r.data, offset); err != nil {
+			outFile.Close()
+			return fmt.Errorf("write piece %d: %w", r.index, err)
+		}
+		atomic.AddInt32(&downloadedPieces, 1)
+		log.Printf("piece %d/%d done", int(downloadedPieces), numPieces)
+	}
+
+	close(queue)
+	fmt.Println("\nDownload complete.")
+	return outFile.Close()
 }

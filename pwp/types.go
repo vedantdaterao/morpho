@@ -1,11 +1,5 @@
 package pwp
 
-import (
-	"bufio"
-	"net"
-	"sync"
-)
-
 const (
 	ProtocolStr    = "BitTorrent protocol"
 	ProtocolStrLen = len(ProtocolStr)      // 19
@@ -13,16 +7,21 @@ const (
 )
 
 const (
-	Msg_Choke         byte = 0
-	Msg_Unchoke       byte = 1
-	Msg_Interested    byte = 2
-	Msg_NotInterested byte = 3
-	Msg_Have          byte = 4
-	Msg_Bitfield      byte = 5
-	Msg_Request       byte = 6
-	Msg_Piece         byte = 7
-	Msg_Cancel        byte = 8
+	Msg_Choke         byte = iota
+	Msg_Unchoke       
+	Msg_Interested    
+	Msg_NotInterested 
+	Msg_Have          
+	Msg_Bitfield      
+	Msg_Request       
+	Msg_Piece         
+	Msg_Cancel        
 )
+
+type Message interface {
+	ID() 		byte
+	Payload() 	[]byte
+}
 
 // handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
 type Msg_handshake struct {
@@ -30,62 +29,36 @@ type Msg_handshake struct {
 	Peer_id   [20]byte
 }
 
-type PeerInfo struct {
-	addr     net.Addr
-	peer_id  []byte
-	bitfield []byte
-
-	connStatus bool
-	reader     *bufio.Reader
-	conn       net.Conn
-
-	amChoking      bool
-	amInterested   bool
-	peerChoking    bool
-	peerInterested bool
-
-	// Mutex sync.Mutex
+type Bitfield struct {
+	Bits 	[]byte
 }
 
-type Message struct {
-	id      byte
-	payload []byte
+type PeerConn interface {
+    WriteMessage(msg Message) 	error
+    ReadMessage	() 				(Message, error)
+    Close		() 				error
+    RemoteAddr	() 				string
 }
 
-type ClientInfo struct {
-	expectedBitfieldLen int
-	Bitfield            []byte
-	infoHash            []byte
-	pieceHashes         [][20]byte
-	piecesLength        uint
-
-	pieceChan chan Block
+type Peer struct {
+    ID       [20]byte
+    Conn     PeerConn
+    Bitfield *Bitfield
+    
+    // State
+    AmChoking      bool
+    AmInterested   bool
+    PeerChoking    bool
+    PeerInterested bool
+    
+    // Channels for communication with downloader
+    incoming chan Message
+    outgoing chan Message
+    close    chan struct{}     // Signal to stop 
 }
 
-const (
-	BlockSize = 16 * 1024
-)
 
-type Block struct {
-	index uint
-	begin uint
-	block []byte
+type pieceWork struct {
+	index int
+	hash  [20]byte
 }
-
-type Piece struct {
-	index    uint
-	data     []byte
-	received []bool
-	done     bool
-}
-
-type ActivePieces struct {
-	pieces map[int]*Piece
-}
-
-type Data struct {
-	mu     sync.Mutex
-	pieces map[uint]*Piece
-}
-
-var data Data

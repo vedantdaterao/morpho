@@ -37,8 +37,8 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 	if !ok {
 		return TorrentFile{}, errors.New("missing or invalid 'info' dictionary")
 	}
-	if pieceLen, ok := infoMap["piece length"].(uint); ok {
-		Info.PieceLength = pieceLen
+	if pieceLen, ok := infoMap["piece length"].(int); ok {
+		Info.PieceLength = uint(pieceLen)
 	}
 	if priv, ok := infoMap["private"].(int); ok {
 		Info.Private = &priv
@@ -49,12 +49,12 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 
 	// single file or multi-file
 	if files, ok := infoMap["files"].([]interface{}); ok {
-		var file FileEntry
 		for _, f := range files {
 			fileDict, ok := f.(map[string]interface{})
 			if !ok {
 				return TorrentFile{}, errors.New("invalid file entry in 'files'")
 			}
+			var file FileEntry
 			if length, ok := fileDict["length"].(int); ok {
 				file.Length = length
 			}
@@ -65,25 +65,20 @@ func Initialize(parsed interface{}) (TorrentFile, error) {
 					}
 				}
 			}
+			Info.Files = append(Info.Files, file)
 		}
-		Info.Files = append(Info.Files, file)
 	} else {
-		// Single-file mode
 		if length, ok := infoMap["length"].(int); ok {
 			Info.Length = length
 		}
 	}
 
-	if piecesRaw, ok := infoMap["after_pieces"].([]byte); ok {
+	if piecesRaw, ok := infoMap["pieces"].([]byte); ok {
 		for i := 0; i+20 <= len(piecesRaw); i += 20 {
 			var hash [20]byte
 			copy(hash[:], piecesRaw[i:i+20])
 			Info.Pieces = append(Info.Pieces, hash)
 		}
-	}
-
-	if pieceLen, ok := infoMap["piece length"].(uint); ok {
-		Torrent.Info.PieceLength = pieceLen
 	}
 
 	Torrent.Info = &Info

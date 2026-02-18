@@ -27,5 +27,8 @@ go.work.sum
 # torrent files
 torrents/
 *.torrent
+*.iso
+
+out/
 
 .vscode

@@ -1,3 +1,3 @@
-module github.com/morpho
+module github.com/torgo
 
 go 1.24.2

@@ -1,58 +1,115 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/morpho/bencoding"
-	"github.com/morpho/torrent"
+	"github.com/torgo/bencoding"
+	"github.com/torgo/pwp"
+	"github.com/torgo/torrent"
 )
 
-func main() {
-    // data, _ := os.ReadFile("assassins_creed_mirage.torrent")
-    // data, _ := os.ReadFile("ubuntu-25.04-desktop-amd64.iso.torrent")
-    data, _ := os.ReadFile("debian.torrent")
-    result, err := bencoding.Decode(data)
-    if err != nil {
-	    log.Fatal(err)
-    }
 
-    TorrentFile, err := torrent.Initialize(result)
-    if err != nil {
-	    log.Fatal(err)
-    }
-
-    torrent.Announce(&TorrentFile)
-    fmt.Println("all peers -------------------", torrent.AllPeerList.GetPeers())
-
-    // JSON -
-    // cleanResult := removeRawKey(result)
-    // jsonData, err := json.MarshalIndent(cleanResult, "", "  ")
-    // if err != nil {
-	//     fmt.Println("Error marshaling to JSON:", err)
-	//     return
-    // }
-
-}
-
-func removeRawKey(data any) any {
-	switch val := data.(type) {
-	case map[string]any:
-		newMap := make(map[string]any)
-		for k, v := range val {
-			if k == "raw" || k == "pieces"{
-				continue
-			}
-			newMap[k] = removeRawKey(v)
-		}
-		return newMap
-	case []any:
-		for i, v := range val {
-			val[i] = removeRawKey(v)
-		}
-		return val
-	default:
-		return val
+func formatBytes(bytes int) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
 	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
+
+func main() {
+	torrentFile := flag.String("f", "", "path to .torrent file")
+	outputDir := flag.String("o", ".", "output directory for downloaded file")
+	verbose := flag.Bool("v", false, "enable verbose logging")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s -f <file.torrent> [-o <output_dir>] [-v]\n", os.Args[0])
+	}
+	flag.Parse()
+
+	if *torrentFile == "" {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Suppress logs unless -v is set
+	if !*verbose {
+		log.SetOutput(io.Discard)
+	}
+
+	data, err := os.ReadFile(*torrentFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	meta, err := bencoding.Decode(data)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tf, err := torrent.Initialize(meta)
+	if err != nil {
+		log.Fatal(err)
+	}
+	outputPath := filepath.Join(*outputDir, tf.Name)
+	// display info
+	fmt.Println(strings.Repeat("-", 64))
+	fmt.Printf("Name:         %s\n", tf.Name)
+	fmt.Printf("Size:         %s (%d bytes)\n", formatBytes(tf.Length), tf.Length)
+	fmt.Printf("Pieces:       %d x %s\n", len(tf.PieceHashes), formatBytes(int(tf.PieceLength)))
+	fmt.Printf("Tracker:      %s\n", tf.Announce)
+	if len(tf.Files) > 0 {
+		fmt.Printf("Files:        %d\n", len(tf.Files))
+	}
+	fmt.Printf("Output:       %s\n", outputPath)
+	fmt.Println(strings.Repeat("-", 64))
+
+	torrent.Announce(&tf)
+
+	peers := torrent.AllPeerList.GetPeers()
+	if len(peers) == 0 {
+		log.Fatal("no peers received from tracker")
+	}
+
+	fmt.Printf("Peers:        %d\n", len(peers))
+	fmt.Println(strings.Repeat("-", 64))
+
+	if err := pwp.Download(tf, peers, *outputDir,  *verbose); err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println()
+}
+
+
+
+// func main() {
+// 	// data, _ := os.ReadFile("torrent_files/CoD-BlackOps6.torrent")
+// 	// data, _ := os.ReadFile("torrent_files/debian.iso.torrent")
+// 	data, _ := os.ReadFile("torrent_files/debian.iso.torrent")
+// 	result, err := bencoding.Decode(data)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+
+// 	torrent.torrent.torrent.TorrentFile, err := torrent.Initialize(result)
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+
+// 	torrent.Announce(&torrent.torrent.torrent.TorrentFile)
+// 	peerList := torrent.AllPeerList.GetPeers()
+// 	fmt.Println("all peers -------------------", peerList)
+
+// 	// peer connection
+// }

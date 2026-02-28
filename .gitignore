@@ -25,4 +25,10 @@ go.work.sum
 .env
 
 # torrent files
+torrents/
 *.torrent
+*.iso
+
+out/
+
+.vscode

@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/morpho/bencoding"
+	"github.com/torgo/bencoding"
 )
 
 func (a *PeerList) AddPeers(newPeers []PeerInfo) {
@@ -31,84 +31,95 @@ func (a *PeerList) AddPeers(newPeers []PeerInfo) {
 	}
 }
 
-
 func (a *PeerList) GetPeers() []PeerInfo {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]PeerInfo{}, a.Peers...) 
+	return append([]PeerInfo{}, a.Peers...)
 }
 
 func (p *PeerList) GetNumberOfPeers() int {
-    p.mu.Lock()        
-    defer p.mu.Unlock() 
-    return len(p.Peers)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.Peers)
 }
 
-func Announce(tf *TorrentFile) error{
+func Announce(tf *TorrentFile) error {
 	url, err := tf.BuildTrackerURL()
-	if err != nil{
+	if err != nil {
 		return errors.New("tracker url error")
 	}
+	tries := 3
 	// fmt.Println("URL - ", url)
 	GetTrackerResponse(url)
-	
+
 	if AllPeerList.GetNumberOfPeers() < 30 {
 		for _, x := range Torrent.AnnounceList {
 			url, err := tf.BuildTrackerURL(x)
-			if err != nil{
+			if err != nil {
 				return errors.New("tracker url error")
 			}
 			// fmt.Println("URL - ", url)
-			GetTrackerResponse(url)
+			if _, err := GetTrackerResponse(url); err != nil {
+				continue
+			}
 			// trackerResp, _ := GetTrackerResponse(url)
 			// jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
-    		// if err != nil {
-	    	// 	fmt.Println("Error marshaling to JSON:", err)
-    		// }
-    		// fmt.Println(string(jsonData))
+			// if err != nil {
+			// 	fmt.Println("Error marshaling to JSON:", err)
+			// }
+			// fmt.Println(string(jsonData))
 		}
 	}
 	// JSON response
 	// jsonData, err := json.MarshalIndent(trackerResp, "", "  ")
-    // if err != nil {
+	// if err != nil {
 	//     fmt.Println("Error marshaling to JSON:", err)
-    // }
-    // fmt.Println(string(jsonData))
+	// }
+	// fmt.Println(string(jsonData))
 	if AllPeerList.GetNumberOfPeers() == 0 {
-		return errors.New("can't get peers from trackers")
+		if tries == 0{
+			return errors.New("can't get peers from trackers")
+		}
+		GetTrackerResponse(url)
+		tries--
 	}
 	return nil
 }
 
-func GetTrackerResponse(fullURL string) (TrackerResponse, error){
+func GetTrackerResponse(fullURL string) (TrackerResponse, error) {
 	if strings.HasPrefix(fullURL, "udp://") {
-	    log.Printf("Skipping unsupported UDP tracker: %s", fullURL)
 		return TrackerResponse{}, nil
-    }
-	resp, err := http.Get(fullURL)
+	}
+
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+	}
+
+	resp, err := client.Get(fullURL)
 	if err != nil {
-		log.Fatalf("HTTP request failed: %v", err)
+		return TrackerResponse{}, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("Failed to read tracker response: %v", err)
+		return TrackerResponse{}, fmt.Errorf("failed to read tracker response: %w", err)
 	}
 
 	decoded, err := bencoding.Decode(bodyBytes)
 	if err != nil {
-		log.Fatalf("Bencode decode failed: %v", err)
+		return TrackerResponse{}, fmt.Errorf("bencode decode failed: %w", err)
 	}
-	
-	trackerResp, err := ParseTrackerResponse(decoded)
+
+	trackerResp, err := parseTrackerResponse(decoded)
 	if err != nil {
-		log.Fatalf("Response Parser failed: %v", err)
+		return TrackerResponse{}, fmt.Errorf("response parser failed: %w", err)
 	}
+
 	return *trackerResp, nil
 }
 
-func ParseTrackerResponse(data any) (*TrackerResponse, error) {
+func parseTrackerResponse(data any) (*TrackerResponse, error) {
 	dict, ok := data.(map[string]any)
 	if !ok {
 		return nil, errors.New("not bencoded dict")
@@ -116,7 +127,7 @@ func ParseTrackerResponse(data any) (*TrackerResponse, error) {
 
 	resp := &TrackerResponse{}
 
-	for key, val := range dict{
+	for key, val := range dict {
 		switch key {
 		case "falure reason":
 			resp.FailureReason = val.(string)
@@ -137,11 +148,11 @@ func ParseTrackerResponse(data any) (*TrackerResponse, error) {
 			switch v := val.(type) {
 			case string:
 				bin := []byte(v)
-				chunks, err := ChunkPeers(bin)
+				chunks, err := chunkPeers(bin)
 				if err != nil {
 					return nil, err
 				}
-				AllPeerList.AddPeers(ParseCompactChunks(chunks))
+				AllPeerList.AddPeers(parseCompactChunks(chunks))
 			case []any:
 				peersList := make([]PeerInfo, 0, len(v))
 				for _, p := range v {
@@ -159,7 +170,7 @@ func ParseTrackerResponse(data any) (*TrackerResponse, error) {
 	return resp, nil
 }
 
-func ChunkPeers(data []byte) ([][6]byte, error) {
+func chunkPeers(data []byte) ([][6]byte, error) {
 	if len(data)%6 != 0 {
 		return nil, fmt.Errorf("invalid compact peer length: %d", len(data))
 	}
@@ -172,8 +183,7 @@ func ChunkPeers(data []byte) ([][6]byte, error) {
 	return chunks, nil
 }
 
-
-func ParseCompactChunks(chunks [][6]byte) []PeerInfo {
+func parseCompactChunks(chunks [][6]byte) []PeerInfo {
 	var peers []PeerInfo
 	for _, b := range chunks {
 		ip := net.IP(b[0:4])
@@ -182,4 +192,3 @@ func ParseCompactChunks(chunks [][6]byte) []PeerInfo {
 	}
 	return peers
 }
-

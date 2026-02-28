@@ -1,6 +1,6 @@
 ```
 NAME
-      torgo - minimal BitTorrent client
+      torgo - BitTorrent client
 
 SYNOPSIS
       torgo -f <file.torrent> [-o <output_dir>] [-v]

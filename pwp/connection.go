@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/torgo/torrent"
 )
@@ -27,7 +30,8 @@ func pieceLengthFor(tf torrent.TorrentFile, index int) int {
 func downloadPiece(peer torrent.PeerInfo, tf torrent.TorrentFile, work pieceWork) ([]byte, error) {
 	addr := fmt.Sprintf("%s:%d", peer.IP, peer.Port)
 
-	peerID := []byte("-GO0001-123456789012")
+	// peerID := []byte("-GO0001-123456789012")
+	peerID := []byte("-GOxxx1-xxxxxxxxxxx0")
 	conn, hs, err := Dial(addr, tf.InfoHash[:], peerID)
 	if err != nil {
 		return nil, err
@@ -170,7 +174,7 @@ func worker(
 	}
 }
 
-func Download(tf torrent.TorrentFile, peers []torrent.PeerInfo) error {
+func Download(tf torrent.TorrentFile, peers []torrent.PeerInfo, outputDir string, verbose bool) error {
 	numPieces := len(tf.PieceHashes)
 
 	queue := make(chan pieceWork, numPieces)
@@ -191,7 +195,13 @@ func Download(tf torrent.TorrentFile, peers []torrent.PeerInfo) error {
 		go worker(peers[i], tf, queue, results)
 	}
 
-	outFile, err := os.Create(tf.Name)
+	// create if it doesnt exist
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	outputPath := filepath.Join(outputDir, tf.Name)
+	outFile, err := os.Create(outputPath)
 	if err != nil {
 		return err
 	}
@@ -201,6 +211,9 @@ func Download(tf torrent.TorrentFile, peers []torrent.PeerInfo) error {
 	}
 
 	var downloadedPieces int32
+	startTime := time.Now()
+	fmt.Println("Downloading...")
+
 	for int(downloadedPieces) < numPieces {
 		r := <-results
 		offset := int64(r.index) * int64(tf.PieceLength)
@@ -209,10 +222,39 @@ func Download(tf torrent.TorrentFile, peers []torrent.PeerInfo) error {
 			return fmt.Errorf("write piece %d: %w", r.index, err)
 		}
 		atomic.AddInt32(&downloadedPieces, 1)
-		log.Printf("piece %d/%d done", int(downloadedPieces), numPieces)
+		
+		// calculate stats
+		percentage := float64(downloadedPieces) / float64(numPieces) * 100
+		elapsed := time.Since(startTime).Seconds()
+		speed := float64(downloadedPieces) / elapsed
+		remaining := float64(numPieces-int(downloadedPieces)) / speed
+		
+		// draw progress bar
+		barWidth := 40
+		filled := int(float64(barWidth) * float64(downloadedPieces) / float64(numPieces))
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+		
+		if verbose {
+			fmt.Printf("\n[%s] %.1f%% | %d/%d pieces | ETA: %ds   ", bar, percentage, downloadedPieces, numPieces, int(remaining))
+		} else {
+			fmt.Printf("\r[%s] %.1f%% | %d/%d pieces | ETA: %ds   ", bar, percentage, downloadedPieces, numPieces, int(remaining))
+		}
 	}
+	fmt.Println()
+
+	// var downloadedPieces int32
+	// for int(downloadedPieces) < numPieces {
+	// 	r := <-results
+	// 	offset := int64(r.index) * int64(tf.PieceLength)
+	// 	if _, err := outFile.WriteAt(r.data, offset); err != nil {
+	// 		outFile.Close()
+	// 		return fmt.Errorf("write piece %d: %w", r.index, err)
+	// 	}
+	// 	atomic.AddInt32(&downloadedPieces, 1)
+	// 	log.Printf("piece %d/%d done", int(downloadedPieces), numPieces)
+	// }
 
 	close(queue)
-	fmt.Println("\nDownload complete.")
+	fmt.Printf("\n✓ Download complete: %s\n", outputPath)
 	return outFile.Close()
 }

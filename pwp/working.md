@@ -32,22 +32,3 @@
 | .       | <-   | piece   | 7      |
 | -       | -    | -       | -      |
 | have    | ->   | .       | 4      |
-
----
-
-## code
-
-```go
-peer = Connect(peer)
-// fills data [ bitfield, interested (0/1), choke (0/1) ]
-
-for {
-    msg = peer.ReadMsg()
-    // process msg
-}
-
-peer.WriteMsg()
-
-buffer = peer.Listner() // return message
-peer.conn.Close()
-```

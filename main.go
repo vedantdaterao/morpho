@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/torgo/bencoding"
 	"github.com/torgo/pwp"
@@ -28,9 +30,10 @@ func formatBytes(bytes int) string {
 
 func main() {
 	torrentFile := flag.String("f", "", "path to .torrent file")
+	outputDir := flag.String("o", ".", "output directory for downloaded file")
 	verbose := flag.Bool("v", false, "enable verbose logging")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s -f <file.torrent> [-v]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s -f <file.torrent> [-o <output_dir>] [-v]\n", os.Args[0])
 	}
 	flag.Parse()
 
@@ -58,17 +61,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// Display torrent info
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	outputPath := filepath.Join(*outputDir, tf.Name)
+	// display info
+	fmt.Println(strings.Repeat("-", 64))
 	fmt.Printf("Name:         %s\n", tf.Name)
 	fmt.Printf("Size:         %s (%d bytes)\n", formatBytes(tf.Length), tf.Length)
-	fmt.Printf("Pieces:       %d × %s\n", len(tf.PieceHashes), formatBytes(int(tf.PieceLength)))
+	fmt.Printf("Pieces:       %d x %s\n", len(tf.PieceHashes), formatBytes(int(tf.PieceLength)))
 	fmt.Printf("Tracker:      %s\n", tf.Announce)
 	if len(tf.Files) > 0 {
 		fmt.Printf("Files:        %d\n", len(tf.Files))
 	}
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("Output:       %s\n", outputPath)
+	fmt.Println(strings.Repeat("-", 64))
 
 	torrent.Announce(&tf)
 
@@ -78,15 +82,13 @@ func main() {
 	}
 
 	fmt.Printf("Peers:        %d\n", len(peers))
-	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println()
+	fmt.Println(strings.Repeat("-", 64))
 
-	if err := pwp.Download(tf, peers); err != nil {
+	if err := pwp.Download(tf, peers, *outputDir,  *verbose); err != nil {
 		log.Fatal(err)
 	}
 
 	fmt.Println()
-	fmt.Println("✓ Download complete.")
 }
 
 

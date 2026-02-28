@@ -227,7 +227,7 @@ func SerializeHandshake(infoHash []byte, peerID []byte) []byte {
 	return buf
 }
 
-// ===== Example main =====
+// example main 
 // func main() {
 // 	// simulate input stream — writing a MsgHave message into a buffer
 // 	buf := make([]byte, 0)
